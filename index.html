@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RollDrop</title>
+<meta name="robots" content="noindex">
+<style>
+  :root {
+    --bg: #17151f;
+    --panel: #221f2d;
+    --ink: #ece9f4;
+    --sub: #aaa5bb;
+    --line: #3a3648;
+    --accent: #5b8ee0;
+    --accent-ink: #ffffff;
+    --warn: #ff9a3c;
+  }
+  * { box-sizing: border-box; }
+  html, button, a { touch-action: manipulation; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", "Meiryo", sans-serif;
+    line-height: 1.7;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .lead { color: var(--sub); margin: 0 0 14px; font-size: .92rem; }
+  .stage {
+    touch-action: none; user-select: none; -webkit-user-select: none;
+    -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+    position: relative; border: 1px solid #2a2733; border-radius: 14px; overflow: hidden;
+    background: radial-gradient(ellipse at 50% 42%, #34313f 0%, #1c1a24 55%, #0e0d13 100%);
+  }
+  #view { display: block; width: 100%; height: min(72vh, 600px); touch-action: none; cursor: pointer; }
+  .hud {
+    position: absolute; left: 12px; right: 12px; top: 10px; font-size: .88rem; color: #a9a4b8;
+    pointer-events: none; display: flex; flex-wrap: wrap; gap: 4px 16px;
+  }
+  .hud b { color: #f1eff7; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+  #combo { color: var(--warn); }
+  .spawnbar {
+    position: absolute; left: 12px; right: 12px; bottom: 10px; height: 4px; border-radius: 2px;
+    background: rgba(255,255,255,.08); overflow: hidden; pointer-events: none;
+  }
+  .spawnbar i { display: block; height: 100%; width: 0; background: var(--warn); }
+  .overlay {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    background: rgba(10, 9, 14, 0.45);
+  }
+  .overlay[hidden] { display: none; }
+  .box {
+    background: #f8f6f0; color: #221d33; border-radius: 16px; padding: 20px 24px 16px;
+    width: min(340px, calc(100% - 32px)); box-shadow: 0 12px 40px rgba(0,0,0,.45);
+  }
+  .box h2 { margin: 0 0 8px; font-size: 1.4rem; text-align: center; }
+  .box ul { margin: 0 0 14px; padding-left: 1.2em; font-size: .88rem; }
+  .stats { display: flex; justify-content: center; gap: 20px; margin-bottom: 8px; }
+  .stats span { display: block; font-size: .78rem; color: #5d5870; text-align: center; }
+  .stats b { display: block; font-size: 1.4rem; font-variant-numeric: tabular-nums; text-align: center; }
+  .seed { text-align: center; font-size: .8rem; color: #5d5870; margin: 0 0 12px; }
+  .actions { display: flex; flex-direction: column; gap: 8px; }
+  .actions button { width: 100%; }
+  .box button.ghost { color: #3c6fc4; border-color: #3c6fc4; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+  button {
+    font: inherit; font-size: .92rem; padding: 8px 14px; border-radius: 10px;
+    border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+    cursor: pointer;
+  }
+  button.ghost { background: transparent; color: var(--accent); }
+  button:active { transform: translateY(1px); }
+</style>
+</head>
+<body>
+<main>
+  <h1>RollDrop</h1>
+  <p class="lead">空きマスの隣のサイコロをタップ（空きが2つ以上ならその向きへスワイプ）すると、1マス転がる。縦か横に同じ目が3つ並ぶと消える。サイコロは数秒ごとに降ってくる。光ったマスには転がせない。</p>
+
+  <div class="stage">
+    <canvas id="view" aria-label="RollDrop の盤"></canvas>
+    <div class="hud">
+      <span>スコア <b id="score">0</b></span>
+      <span>時間 <b id="time">0:00</b></span>
+      <span>消した数 <b id="cleared">0</b></span>
+      <span id="combo"></span>
+    </div>
+    <div class="spawnbar"><i id="spawnbar"></i></div>
+
+    <div class="overlay" id="ov-start">
+      <div class="box" role="dialog" aria-labelledby="start-title">
+        <h2 id="start-title">RollDrop</h2>
+        <ul>
+          <li>空きマスの隣のサイコロを転がす。転がると上の目が変わる</li>
+          <li>縦か横に同じ目が3つ以上並ぶと消える</li>
+          <li>3秒以内に続けて消すとコンボで得点が増える</li>
+          <li>光ったマスには、もうすぐサイコロが降ってくる</li>
+          <li>盤が全部うまったら終わり</li>
+        </ul>
+        <div class="actions"><button id="btn-start">スタート</button></div>
+      </div>
+    </div>
+
+    <div class="overlay" id="ov-pause" hidden>
+      <div class="box" role="dialog" aria-labelledby="pause-title">
+        <h2 id="pause-title">一時停止</h2>
+        <div class="actions"><button id="btn-resume">つづける</button></div>
+      </div>
+    </div>
+
+    <div class="overlay" id="ov-over" hidden>
+      <div class="box" role="dialog" aria-labelledby="over-title">
+        <h2 id="over-title">ゲームオーバー</h2>
+        <div class="stats">
+          <div><span>スコア</span><b id="over-score"></b></div>
+          <div><span>時間</span><b id="over-time"></b></div>
+          <div><span>消した数</span><b id="over-cleared"></b></div>
+        </div>
+        <p class="seed">シード <span id="over-seed"></span>（URL に ?seed=この数 で同じ降り方）</p>
+        <div class="actions">
+          <button id="btn-again">もう一度</button>
+          <button class="ghost" id="btn-same">同じシードでもう一度</button>
+          <button class="ghost" id="btn-log">操作の記録を保存（JSON）</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="ghost" id="btn-pause">一時停止</button>
+    <button class="ghost" id="btn-restart">最初から</button>
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+  // ---- 定数 ----
+  const SIZE = 5;
+  const CELLS = SIZE * SIZE;
+  const START_DICE = 14;
+  const MATCH_LEN = 3;
+  const ROLL_MS = 150;
+  const DROP_MS = 320;
+  const CLEAR_MS = 380;
+  const WARN_MS = 1300;
+  const FIRST_INTERVAL = 3000;
+  const MIN_INTERVAL = 900;
+  const INTERVAL_STEP = 40;
+  const COMBO_WINDOW = 3000;
+  const DIE = 0.9;
+  const HALF = DIE / 2;
+  const DIRS = [
+    { dc: 1, dr: 0 }, { dc: -1, dr: 0 }, { dc: 0, dr: 1 }, { dc: 0, dr: -1 },
+  ];
+
+  // ---- 乱数（シード付き mulberry32） ----
+  const params = new URLSearchParams(location.search);
+  const parseSeed = (s) => {
+    const n = Number(s);
+    return Number.isInteger(n) && n >= 0 ? n >>> 0 : null;
+  };
+  const mulberry32 = (a) => () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+
+  // ---- サイコロの向き ----
+  // BoxGeometry の面の順（+x, -x, +y, -y, +z, -z）に置く目。向かい合う目の和は 7
+  const FACE_VALUES = [3, 4, 1, 6, 2, 5];
+  const snapQuat = (q) => {
+    const m = new THREE.Matrix4().makeRotationFromQuaternion(q);
+    const e = m.elements;
+    for (const i of [0, 1, 2, 4, 5, 6, 8, 9, 10]) e[i] = Math.round(e[i]);
+    return new THREE.Quaternion().setFromRotationMatrix(m);
+  };
+  const quatKey = (q) => {
+    const e = new THREE.Matrix4().makeRotationFromQuaternion(q).elements;
+    return [0, 1, 2, 4, 5, 6, 8, 9, 10].map((i) => Math.round(e[i])).join(",");
+  };
+  // 24 通りの向き
+  const ORIENTS = (() => {
+    const seen = new Map();
+    const ax = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) for (let k = 0; k < 4; k++) {
+      const q = new THREE.Quaternion().setFromAxisAngle(ax[0], i * Math.PI / 2)
+        .premultiply(new THREE.Quaternion().setFromAxisAngle(ax[1], j * Math.PI / 2))
+        .premultiply(new THREE.Quaternion().setFromAxisAngle(ax[2], k * Math.PI / 2));
+      const s = snapQuat(q);
+      seen.set(quatKey(s), s);
+    }
+    return [...seen.values()];
+  })();
+  const topValue = (q) => {
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(q.clone().invert());
+    const a = [Math.abs(up.x), Math.abs(up.y), Math.abs(up.z)];
+    const axis = a.indexOf(Math.max(...a));
+    const positive = [up.x, up.y, up.z][axis] > 0;
+    return FACE_VALUES[axis * 2 + (positive ? 0 : 1)];
+  };
+  const rollQuat = (d, angle) =>
+    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(d.dr, 0, -d.dc), angle);
+
+  // ---- 盤の座標 ----
+  const cellOf = (r, c) => r * SIZE + c;
+  const rcOf = (cell) => ({ r: Math.floor(cell / SIZE), c: cell % SIZE });
+  const inBoard = (r, c) => r >= 0 && r < SIZE && c >= 0 && c < SIZE;
+  const worldOf = (cell) => {
+    const { r, c } = rcOf(cell);
+    const o = (SIZE - 1) / 2;
+    return new THREE.Vector3(c - o, HALF, r - o);
+  };
+
+  // ---- 描画 ----
+  const canvas = document.getElementById("view");
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.62;
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 100);
+
+  const buildEnvironment = () => {
+    const env = new THREE.Scene();
+    const sky = new THREE.SphereGeometry(30, 32, 16);
+    const top = new THREE.Color(0.42, 0.43, 0.48), bottom = new THREE.Color(0.04, 0.04, 0.05);
+    const colors = [];
+    const p = sky.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const t = THREE.MathUtils.smoothstep(p.getY(i), -18, 22);
+      const c = bottom.clone().lerp(top, t);
+      colors.push(c.r, c.g, c.b);
+    }
+    sky.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    env.add(new THREE.Mesh(sky, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+    const panel = (w, h, pos, intensity) => {
+      const m = new THREE.Mesh(
+        new THREE.PlaneGeometry(w, h),
+        new THREE.MeshBasicMaterial({ color: new THREE.Color(intensity, intensity, intensity), side: THREE.DoubleSide })
+      );
+      m.position.set(...pos);
+      m.lookAt(0, 0, 0);
+      env.add(m);
+    };
+    panel(12, 6, [6, 14, 12], 9);
+    panel(4, 12, [-16, 4, 6], 5);
+    panel(8, 3, [10, 2, -16], 3);
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const tex = pmrem.fromScene(env, 0.035).texture;
+    pmrem.dispose();
+    return tex;
+  };
+  scene.environment = buildEnvironment();
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x3a3644, 0.15));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.5);
+  sun.position.set(4, 9, 6);
+  scene.add(sun);
+
+  // 角を丸めた立方体
+  const roundedBox = (size, r, seg) => {
+    const geo = new THREE.BoxGeometry(size, size, size, seg, seg, seg);
+    const pos = geo.attributes.position;
+    const nor = geo.attributes.normal;
+    const inner = size / 2 - r;
+    const v = new THREE.Vector3(), c = new THREE.Vector3(), d = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i);
+      c.set(
+        THREE.MathUtils.clamp(v.x, -inner, inner),
+        THREE.MathUtils.clamp(v.y, -inner, inner),
+        THREE.MathUtils.clamp(v.z, -inner, inner)
+      );
+      d.subVectors(v, c);
+      if (d.lengthSq() < 1e-12) continue;
+      d.normalize();
+      pos.setXYZ(i, c.x + d.x * r, c.y + d.y * r, c.z + d.z * r);
+      nor.setXYZ(i, d.x, d.y, d.z);
+    }
+    return geo;
+  };
+
+  const PIPS = {
+    1: [[0.5, 0.5]],
+    2: [[0.27, 0.27], [0.73, 0.73]],
+    3: [[0.27, 0.27], [0.5, 0.5], [0.73, 0.73]],
+    4: [[0.27, 0.27], [0.73, 0.27], [0.27, 0.73], [0.73, 0.73]],
+    5: [[0.27, 0.27], [0.73, 0.27], [0.5, 0.5], [0.27, 0.73], [0.73, 0.73]],
+    6: [[0.27, 0.25], [0.73, 0.25], [0.27, 0.5], [0.73, 0.5], [0.27, 0.75], [0.73, 0.75]],
+  };
+  const makeFaceTexture = (n) => {
+    const s = 256;
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = s;
+    const g = cv.getContext("2d");
+    g.fillStyle = "#f2efe6";
+    g.fillRect(0, 0, s, s);
+    const vg = g.createRadialGradient(s / 2, s / 2, s * 0.25, s / 2, s / 2, s * 0.75);
+    vg.addColorStop(0, "rgba(255,255,255,0.05)");
+    vg.addColorStop(1, "rgba(0,0,0,0.18)");
+    g.fillStyle = vg;
+    g.fillRect(0, 0, s, s);
+    const rad = n === 1 ? 34 : 22;
+    PIPS[n].forEach(([x, y]) => {
+      const cx = x * s, cy = y * s;
+      // くぼみ風：上に影、下にハイライト
+      g.fillStyle = "rgba(255,255,255,0.7)";
+      g.beginPath(); g.arc(cx + 1, cy + 3, rad, 0, Math.PI * 2); g.fill();
+      g.fillStyle = n === 1 ? "#c8302c" : "#26232e";
+      g.beginPath(); g.arc(cx, cy, rad, 0, Math.PI * 2); g.fill();
+    });
+    const tex = new THREE.CanvasTexture(cv);
+    tex.encoding = THREE.sRGBEncoding;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return tex;
+  };
+  const dieGeo = roundedBox(DIE, 0.1, 10);
+  const dieMats = FACE_VALUES.map((n) => new THREE.MeshPhysicalMaterial({
+    map: makeFaceTexture(n), roughness: 0.38, metalness: 0,
+    clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 0.8,
+  }));
+
+  // 盤
+  const boardGroup = new THREE.Group();
+  scene.add(boardGroup);
+  const base = new THREE.Mesh(
+    roundedBox(1, 0.04, 4),
+    new THREE.MeshPhysicalMaterial({ color: 0x24212d, roughness: 0.6, clearcoat: 0.4, clearcoatRoughness: 0.3, envMapIntensity: 0.3 })
+  );
+  base.scale.set(SIZE + 0.4, 0.3, SIZE + 0.4);
+  base.position.y = -0.15;
+  boardGroup.add(base);
+  const slotMat = new THREE.MeshStandardMaterial({ color: 0x2f2c3a, roughness: 0.8, envMapIntensity: 0.3 });
+  const slotGeo = new THREE.PlaneGeometry(0.94, 0.94);
+  for (let i = 0; i < CELLS; i++) {
+    const m = new THREE.Mesh(slotGeo, slotMat);
+    m.rotation.x = -Math.PI / 2;
+    m.position.copy(worldOf(i)).setY(0.002);
+    boardGroup.add(m);
+  }
+  const warnGeo = new THREE.PlaneGeometry(0.94, 0.94);
+
+  const placeCamera = () => {
+    const aspect = camera.aspect || 1;
+    // 縦長の画面でも盤の幅が収まるよう距離を変える
+    const dist = aspect >= 1 ? 11.5 : 11.5 / Math.max(0.55, aspect) * 0.9;
+    const tilt = 0.5; // 真上から傾ける角度（ラジアン）。0 で真上
+    camera.position.set(0, Math.cos(tilt) * dist, Math.sin(tilt) * dist);
+    camera.lookAt(0, 0, 0);
+  };
+
+  // ---- 状態 ----
+  let rand = Math.random;
+  let seed = 0;
+  let dice = [];        // { id, cell, q, state: idle|rolling|dropping|clearing, mesh, anim }
+  let warns = [];       // { cell, at, mesh }
+  let gt = 0;           // ゲーム内の経過時間（ms、一時停止中は進まない）
+  let running = false;
+  let paused = false;
+  let over = false;
+  let nextWarnAt = 0;
+  let interval = FIRST_INTERVAL;
+  let score = 0;
+  let clearedCount = 0;
+  let combo = 0;
+  let lastClearAt = -Infinity;
+  let nextId = 1;
+  let log = [];
+
+  const dieAt = (cell) => dice.find((d) => d.cell === cell) || null;
+  const isWarned = (cell) => warns.some((w) => w.cell === cell);
+  const isFree = (cell) => !dieAt(cell) && !isWarned(cell);
+  const pickRandom = (arr) => arr[Math.floor(rand() * arr.length)];
+
+  const addDie = (cell, q, state) => {
+    const mesh = new THREE.Mesh(dieGeo, dieMats);
+    mesh.position.copy(worldOf(cell));
+    mesh.quaternion.copy(q);
+    scene.add(mesh);
+    const d = { id: nextId++, cell, q: q.clone(), state, mesh, anim: null };
+    mesh.userData.die = d;
+    dice.push(d);
+    return d;
+  };
+  const removeDie = (d) => {
+    scene.remove(d.mesh);
+    dice = dice.filter((x) => x !== d);
+  };
+
+  // ---- そろったかの判定 ----
+  const findMatches = () => {
+    const grid = Array.from({ length: CELLS }, (_, i) => {
+      const d = dieAt(i);
+      return d && d.state === "idle" ? topValue(d.q) : 0;
+    });
+    const hit = new Set();
+    const scan = (cellsOfLine) => {
+      let run = [];
+      const flush = () => {
+        if (run.length >= MATCH_LEN) run.forEach((c) => hit.add(c));
+        run = [];
+      };
+      cellsOfLine.forEach((cell) => {
+        const v = grid[cell];
+        if (v && run.length && grid[run[0]] === v) run.push(cell);
+        else { flush(); if (v) run.push(cell); }
+      });
+      flush();
+    };
+    for (let i = 0; i < SIZE; i++) {
+      scan(Array.from({ length: SIZE }, (_, k) => cellOf(i, k)));
+      scan(Array.from({ length: SIZE }, (_, k) => cellOf(k, i)));
+    }
+    return [...hit];
+  };
+
+  const resolveMatches = () => {
+    const hit = findMatches();
+    if (!hit.length) return;
+    combo = gt - lastClearAt <= COMBO_WINDOW ? combo + 1 : 1;
+    lastClearAt = gt;
+    const value = topValue(dieAt(hit[0]).q);
+    const gained = hit.length * value * 10 * combo;
+    score += gained;
+    clearedCount += hit.length;
+    log.push({ t: Math.round(gt), type: "clear", cells: hit, value, combo, gained });
+    hit.forEach((cell) => {
+      const d = dieAt(cell);
+      d.state = "clearing";
+      d.anim = { type: "clear", t0: gt };
+    });
+    updateHud();
+  };
+
+  // ---- 操作 ----
+  const tryRoll = (d, dir) => {
+    if (!running || paused || over || d.state !== "idle") return false;
+    const { r, c } = rcOf(d.cell);
+    const nr = r + dir.dr, nc = c + dir.dc;
+    if (!inBoard(nr, nc) || !isFree(cellOf(nr, nc))) return false;
+    const from = d.cell;
+    d.cell = cellOf(nr, nc);
+    const q0 = d.q.clone();
+    d.q = snapQuat(rollQuat(dir, Math.PI / 2).multiply(q0));
+    d.state = "rolling";
+    d.anim = { type: "roll", t0: gt, from: worldOf(from), to: worldOf(d.cell), q0, dir };
+    log.push({ t: Math.round(gt), type: "roll", from, to: d.cell, top: topValue(d.q) });
+    return true;
+  };
+  const freeDirs = (d) => DIRS.filter((dir) => {
+    const { r, c } = rcOf(d.cell);
+    const nr = r + dir.dr, nc = c + dir.dc;
+    return inBoard(nr, nc) && isFree(cellOf(nr, nc));
+  });
+  const shake = (d) => { if (d.state === "idle") d.anim = { type: "shake", t0: gt }; };
+
+  // ---- 降ってくるサイコロ ----
+  const scheduleWarn = () => {
+    const free = [...Array(CELLS).keys()].filter(isFree);
+    if (!free.length) return false;
+    const cell = pickRandom(free);
+    const mesh = new THREE.Mesh(warnGeo, new THREE.MeshBasicMaterial({
+      color: 0xff9a3c, transparent: true, opacity: 0.4, depthWrite: false,
+    }));
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.copy(worldOf(cell)).setY(0.006);
+    scene.add(mesh);
+    warns.push({ cell, at: gt + WARN_MS, mesh });
+    log.push({ t: Math.round(gt), type: "warn", cell });
+    return true;
+  };
+  const dropDie = (w) => {
+    scene.remove(w.mesh);
+    warns = warns.filter((x) => x !== w);
+    const q = pickRandom(ORIENTS);
+    const d = addDie(w.cell, q, "dropping");
+    d.anim = { type: "drop", t0: gt };
+    log.push({ t: Math.round(gt), type: "drop", cell: w.cell, top: topValue(q) });
+  };
+
+  const checkGameOver = () => {
+    const busy = dice.some((d) => d.state !== "idle") || warns.length;
+    if (dice.length >= CELLS && !busy) endGame();
+  };
+
+  // ---- アニメーション ----
+  const easeOut = (t) => t * (2 - t);
+  const stepAnim = (d) => {
+    const a = d.anim;
+    if (!a) return;
+    const el = gt - a.t0;
+    if (a.type === "roll") {
+      const t = Math.min(1, el / ROLL_MS);
+      const th = (Math.PI / 2) * t;
+      d.mesh.quaternion.copy(rollQuat(a.dir, th).multiply(a.q0));
+      d.mesh.position.lerpVectors(a.from, a.to, t);
+      // 辺を軸に転がるときの中心の高さ
+      d.mesh.position.y = HALF * (Math.cos(th) + Math.sin(th));
+      if (t >= 1) {
+        d.mesh.quaternion.copy(d.q);
+        d.mesh.position.copy(a.to);
+        d.anim = null;
+        d.state = "idle";
+        resolveMatches();
+      }
+    } else if (a.type === "drop") {
+      const t = Math.min(1, el / DROP_MS);
+      const target = worldOf(d.cell);
+      d.mesh.position.set(target.x, target.y + 5 * (1 - t * t), target.z);
+      if (t >= 1) {
+        d.mesh.position.copy(target);
+        d.anim = null;
+        d.state = "idle";
+        resolveMatches();
+        checkGameOver();
+      }
+    } else if (a.type === "clear") {
+      const t = Math.min(1, el / CLEAR_MS);
+      const s = t < 0.3 ? 1 + t * 0.5 : 1.15 * (1 - (t - 0.3) / 0.7);
+      d.mesh.scale.setScalar(Math.max(0.001, s));
+      if (t >= 1) removeDie(d);
+    } else if (a.type === "shake") {
+      const t = Math.min(1, el / 200);
+      const base = worldOf(d.cell);
+      d.mesh.position.set(base.x + Math.sin(t * Math.PI * 4) * 0.06 * (1 - t), base.y, base.z);
+      if (t >= 1) { d.mesh.position.copy(base); d.anim = null; }
+    }
+  };
+
+  // ---- 画面表示 ----
+  const $ = (id) => document.getElementById(id);
+  const formatTime = (ms) => {
+    const s = Math.floor(ms / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  };
+  const updateHud = () => {
+    $("score").textContent = score;
+    $("cleared").textContent = clearedCount;
+    $("combo").textContent = combo > 1 && gt - lastClearAt <= COMBO_WINDOW ? `コンボ ×${combo}` : "";
+  };
+
+  // ---- ゲームの流れ ----
+  const clearBoard = () => {
+    dice.forEach((d) => scene.remove(d.mesh));
+    warns.forEach((w) => scene.remove(w.mesh));
+    dice = [];
+    warns = [];
+  };
+  const setupBoard = () => {
+    clearBoard();
+    // 最初から3つ並んでいない配置になるまで引き直す
+    for (;;) {
+      clearBoard();
+      const cells = [...Array(CELLS).keys()];
+      for (let i = cells.length - 1; i > 0; i--) {
+        const j = Math.floor(rand() * (i + 1));
+        [cells[i], cells[j]] = [cells[j], cells[i]];
+      }
+      cells.slice(0, START_DICE).forEach((cell) => addDie(cell, pickRandom(ORIENTS), "idle"));
+      if (!findMatches().length) break;
+    }
+  };
+
+  const newGame = (fixedSeed) => {
+    seed = fixedSeed ?? parseSeed(params.get("seed")) ?? (Math.random() * 2 ** 32) >>> 0;
+    rand = mulberry32(seed);
+    gt = 0;
+    score = 0;
+    clearedCount = 0;
+    combo = 0;
+    lastClearAt = -Infinity;
+    interval = FIRST_INTERVAL;
+    nextWarnAt = interval;
+    over = false;
+    paused = false;
+    setupBoard();
+    log = [{ t: 0, type: "start", seed, board: dice.map((d) => ({ cell: d.cell, top: topValue(d.q), q: d.q.toArray().map((v) => +v.toFixed(4)) })) }];
+    updateHud();
+    $("time").textContent = formatTime(0);
+  };
+  const start = (fixedSeed) => {
+    newGame(fixedSeed);
+    running = true;
+    ["ov-start", "ov-over", "ov-pause"].forEach((id) => { $(id).hidden = true; });
+  };
+  const endGame = () => {
+    over = true;
+    running = false;
+    log.push({ t: Math.round(gt), type: "over", score, cleared: clearedCount });
+    $("over-score").textContent = score;
+    $("over-time").textContent = formatTime(gt);
+    $("over-cleared").textContent = clearedCount;
+    $("over-seed").textContent = seed;
+    $("ov-over").hidden = false;
+  };
+  const setPaused = (p) => {
+    if (!running || over) return;
+    paused = p;
+    $("ov-pause").hidden = !p;
+  };
+
+  const saveLog = () => {
+    const blob = new Blob([JSON.stringify({ game: "RollDrop", seed, score, cleared: clearedCount, durationMs: Math.round(gt), events: log }, null, 1)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `rolldrop-seed${seed}-score${score}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+
+  $("btn-start").addEventListener("click", () => start());
+  $("btn-again").addEventListener("click", () => start((Math.random() * 2 ** 32) >>> 0));
+  $("btn-same").addEventListener("click", () => start(seed));
+  $("btn-log").addEventListener("click", saveLog);
+  $("btn-pause").addEventListener("click", () => setPaused(!paused));
+  $("btn-resume").addEventListener("click", () => setPaused(false));
+  $("btn-restart").addEventListener("click", () => start((Math.random() * 2 ** 32) >>> 0));
+  document.addEventListener("visibilitychange", () => { if (document.hidden) setPaused(true); });
+
+  // ---- ループ ----
+  let last = performance.now();
+  const tick = (now) => {
+    const dt = Math.min(100, now - last);
+    last = now;
+    if (running && !paused && !over) {
+      gt += dt;
+      if (gt >= nextWarnAt) {
+        if (scheduleWarn()) {
+          interval = Math.max(MIN_INTERVAL, interval - INTERVAL_STEP);
+          nextWarnAt = gt + interval;
+        } else {
+          checkGameOver();
+        }
+      }
+      warns.filter((w) => gt >= w.at && !dieAt(w.cell)).forEach(dropDie);
+      [...dice].forEach(stepAnim);
+      $("time").textContent = formatTime(gt);
+      $("spawnbar").style.width = `${Math.min(100, (1 - (nextWarnAt - gt) / interval) * 100)}%`;
+      if (combo > 1 && gt - lastClearAt > COMBO_WINDOW) updateHud();
+      warns.forEach((w) => {
+        w.mesh.material.opacity = 0.25 + 0.35 * (0.5 + 0.5 * Math.sin(gt / 90));
+      });
+    }
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  };
+
+  // ---- ポインタ ----
+  const raycaster = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  const floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const setRay = (x, y) => {
+    const r = canvas.getBoundingClientRect();
+    ndc.set(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
+    raycaster.setFromCamera(ndc, camera);
+  };
+  const pickDie = (x, y) => {
+    setRay(x, y);
+    const hit = raycaster.intersectObjects(dice.map((d) => d.mesh), false)[0];
+    return hit ? hit.object.userData.die : null;
+  };
+  const pickCell = (x, y) => {
+    setRay(x, y);
+    const p = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(floor, p)) return -1;
+    const o = (SIZE - 1) / 2;
+    const c = Math.round(p.x + o), r = Math.round(p.z + o);
+    return inBoard(r, c) ? cellOf(r, c) : -1;
+  };
+  const toScreen = (v) => {
+    const p = v.clone().project(camera);
+    return { x: p.x, y: -p.y };
+  };
+
+  let down = null;
+  canvas.addEventListener("pointerdown", (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    down = { x: e.clientX, y: e.clientY, die: pickDie(e.clientX, e.clientY), cell: pickCell(e.clientX, e.clientY) };
+  });
+  const endPointer = (e) => {
+    if (!down || e.type !== "pointerup") { down = null; return; }
+    const { die, cell } = down;
+    const dx = e.clientX - down.x, dy = e.clientY - down.y;
+    down = null;
+    if (!running || paused || over) return;
+    if (Math.hypot(dx, dy) > 14 && die) {
+      // スワイプの向きに近い盤の向きを選ぶ
+      const o = toScreen(die.mesh.position);
+      const len = Math.hypot(dx, dy);
+      let best = null, bestDot = -Infinity;
+      DIRS.forEach((dir) => {
+        const s = toScreen(die.mesh.position.clone().add(new THREE.Vector3(dir.dc, 0, dir.dr)));
+        const vx = s.x - o.x, vy = s.y - o.y;
+        const dot = (vx * dx + vy * dy) / (Math.hypot(vx, vy) * len);
+        if (dot > bestDot) { bestDot = dot; best = dir; }
+      });
+      if (!tryRoll(die, best)) shake(die);
+      return;
+    }
+    if (die) {
+      const dirs = freeDirs(die);
+      if (dirs.length === 1) tryRoll(die, dirs[0]);
+      else shake(die);
+      return;
+    }
+    // 空きマスのタップ：隣のサイコロが1つだけならそれを転がし込む
+    if (cell >= 0 && isFree(cell)) {
+      const { r, c } = rcOf(cell);
+      const cands = DIRS.map((dir) => ({ dir, d: inBoard(r - dir.dr, c - dir.dc) ? dieAt(cellOf(r - dir.dr, c - dir.dc)) : null }))
+        .filter((x) => x.d && x.d.state === "idle");
+      if (cands.length === 1) tryRoll(cands[0].d, cands[0].dir);
+    }
+  };
+  canvas.addEventListener("pointerup", endPointer);
+  canvas.addEventListener("pointercancel", endPointer);
+  ["touchstart", "touchend", "dblclick"].forEach((type) =>
+    canvas.addEventListener(type, (e) => e.preventDefault(), { passive: false })
+  );
+
+  // ---- サイズ調整 ----
+  const resize = () => {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    placeCamera();
+  };
+  new ResizeObserver(resize).observe(canvas);
+  resize();
+
+  newGame();
+  requestAnimationFrame(tick);
+
+  // 動作確認用
+  window.__rolldrop = { get dice() { return dice; }, get warns() { return warns; }, topValue, tryRoll, DIRS, findMatches, get gt() { return gt; } };
+})();
+</script>
+</body>
+</html>
